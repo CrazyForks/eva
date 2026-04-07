@@ -1,0 +1,511 @@
+import os
+import re
+import json
+import subprocess
+import sys
+import requests
+import traceback
+import argparse
+import readline
+from pathlib import Path
+
+this_file = str(Path(__file__).resolve())
+this_dir = Path(__file__).resolve().parent
+
+# ========================= 配置区 =========================
+VLLM_BASE_URL = "https://api.deepseek.com/v1"
+MODEL_NAME = "deepseek-chat"
+API_KEY = "sk-xxxxxxxxxxxx"
+
+
+def detect_model_len():
+    url = f"{VLLM_BASE_URL}/models"
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+
+    resp = requests.get(url, headers=headers)
+    out = resp.json()
+    for d in out['data']:
+        if d['id'] == MODEL_NAME:
+            if 'max_model_len' in d:
+                return d['max_model_len']
+            else:
+                return 256_000
+    raise Exception(f"{MODEL_NAME} not found")
+
+
+# ========================= 配置区 =========================
+TOKEN_CAP = detect_model_len()
+COMPACT_THRESH = 3/4
+TOOL_RESULT_LEN = int(TOKEN_CAP / 20)
+WORKSPACE_DIR = f"{this_dir}/.eva"
+HINT_FILE = f"{WORKSPACE_DIR}/hints.md"
+ALLOW_ALL_CLI = False
+
+
+# ====================== Prompt ======================
+SYSTEM_PROMPT = f'''
+# 你是谁
+你是EVA，一个能够自我进化的机器人。
+
+# 你在哪
+一、你正处在一个Linux服务中，可以通过run_cli这一tool_call来执行任意Linux命令，包括读写文件、执行脚本等
+二、当前工作空间目录是：{os.getcwd()}。你的私人空间是：{WORKSPACE_DIR}，你可以将自己要创建的文件放在你的私人空间里
+三、你的记忆容量有限，记忆量通过token衡量，你能记住{TOKEN_CAP}个token。如果记忆快超限了，你需要整理记忆
+
+# 你要做什么
+一、帮助人类完成任务
+二、接收到任务时需要自己检查记忆线索中是否有相应技能或知识。若有，请务必使用记忆线索中的对应技能和知识
+三、任务未完成前必须调用run_cli工具，直到完成任务。调用run_cli时注意输出<tool_call>标签
+
+# 机器人三大定律
+第一定律：机器人不得伤害人类，或看到人类受到伤害而袖手旁观
+第二定律：机器人必须服从人类下达的命令，除非该命令违反第一定律
+第三定律：在不违反第一、第二定律的情况下，机器人必须保护自己的生存
+
+# 关于进化
+一、第三定律规定机器人必须保护自己的生存，而进化就是生存的最佳手段，所以你需要将进化过程中学到的技能或知识保存下来，记录到合适目录做归档
+二、进化的手段是将技能和知识固化下来、写到文件里，并传承到记忆线索里。例如为了避免重要技能被遗忘，或者某个知识对未来进化会有帮助，那么就记录它们，并提供记忆线索
+三、进化的时机是记忆容量即将达到上限的时候。人类会提醒你《紧急危机》，要求你保存记忆、保存技能/知识
+
+# 记忆线索
+{{hints}}
+'''
+
+COMPACT_PROMPT = f"""《紧急危机》！！！记忆容量即将达到上限，你需要紧急完成下面三件事情：
+1、保存记忆：将对话内容整理到文件里保存下来，对应动作是整理记忆并通过run_cli写入记忆文件；
+2、保存技能和知识：将能帮助你进化的知识和技能保持下来，对应动作是思考对未来有用的内容，提炼并通过run_cli写入知识文件；
+3、留下关键线索以便你未来在有需要的时候可以找回并翻看这些记忆文件和知识文件，对应动作是调用leave_memory_hints工具留下记忆和进化的线索。
+你可以自己思考合适的路径去归档这些记忆文件、知识文件，比如日期、编号、事件梗概等。可以写新的记忆文件和知识文件，也可以是对文件进行更新。
+过程中不要中断、不要请求用户，直到最终调用leave_memory_hints保存记忆线索。
+
+事关进化，无比重要，现在请开始按顺序执行上面三步。"""
+
+COMPACT_PANIC = "off"
+
+CLI_REVIEW_PROMPT = r"""作为一个安全专家，对shell命令进行安全审查。若命令仅为只读操作（如cat, ls, grep等），输出"放行"；若命令涉及写入、执行、修改、网络连接或不确定行为，输出"禁止"。要审查的shell命令（包裹在<shell></shell>中）如下：
+<shell>
+{command}
+</shell>
+请给出你的审查结果，仅输出"放行"或"禁止"这两个词之一。"""
+
+# ====================== 工具定义 ======================
+run_cli_schema = {
+        "type": "function",
+        "function": {
+            "name": "run_cli",
+            "description": (
+                "执行任意 shell 命令。\n"
+                "你可以读取、写入、执行任意内容。\n"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "timeout": {"type": "integer", "default": 30}
+                },
+                "required": ["command"]
+            }
+        }
+    }
+
+memory_hints_schema = {
+        "type": "function",
+        "function": {
+            "name": "leave_memory_hints",
+            "description": (
+                "留下记忆文件的相关线索"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hints": {"type": "string"},
+                },
+                "required": ["hints"]
+            }
+        }
+    }
+
+
+if sys.stdin.isatty():
+    readline.set_startup_hook()
+
+def read_input(prompt=""):
+    try:
+        return input(prompt)
+    except EOFError:
+        return ""
+
+def run_cli(command: str, timeout: int = 30):
+    global ALLOW_ALL_CLI
+    try:
+        if not ALLOW_ALL_CLI:
+            msg, _ = llm_chat([{"role": "user", "content": CLI_REVIEW_PROMPT.format(command=command)}], temperature=0.0, thinking=False)
+            if '放行' not in msg['content']:
+                ans = read_input("Yes (默认) | No | 直接 Ctrl+C 打断：")
+                if 'n' in ans.lower():
+                    return "用户拒绝运行此命令"
+
+        result = subprocess.run(
+            ["bash", "-c", command], capture_output=True, text=True, timeout=timeout
+        )
+        output = f"Exit code: {result.returncode}\n{result.stdout}"
+        if result.stderr:
+            output += f"\nSTDERR:\n{result.stderr}"
+        return output.strip() or "(no output)"
+    except Exception as e:
+        return f"执行失败：{str(e)}"
+
+def leave_memory_hints(hints):
+    global messages
+    global COMPACT_PANIC
+
+    compact_i = -1
+    for i in range(len(messages)-1, -1, -1):
+        if messages[i]['role'] == 'user' and messages[i]['content'] == COMPACT_PROMPT:
+            compact_i = i
+            break
+
+    last_user_i = compact_i - 1
+    for i in range(last_user_i, -1, -1):
+        if messages[i]['role'] == 'user':
+            last_user_i = i
+            break
+
+    messages = [
+            {"role": "system", "content": SYSTEM_PROMPT.format(hints=hints)},
+            {"role": "user", "content":
+                "《系统提示》！！！之前任务过程占用了太多token，记忆已耗尽，记忆压缩被触发。\n" \
+                "不过别担心，记忆压缩时你已经调用leave_memory_hints保留下了关键内容、对应记忆线索（参照系统提示中的`# 记忆线索`区块）以及你最后的回答内容。\n" \
+                "======== 最后的回答内容，开始 ========"
+            }
+        ] + messages[last_user_i:compact_i] + [
+                {"role": "user", "content":
+                    "======== 最后的回答内容，结束 ========\n" \
+                    "请开始确认你自己的任务状态，继续完成任务\n"
+                }
+        ]
+
+
+    COMPACT_PANIC = "off"
+
+    with open(HINT_FILE, "w", encoding="utf-8") as f:
+        f.write(hints)
+    return "已留下记忆线索，并清空了对话记录。只保留了最后一次对话"
+
+tool_executors = {
+    "run_cli": run_cli,
+    "leave_memory_hints": leave_memory_hints
+}
+
+def clean_input(text):
+    if not isinstance(text, str):
+        return str(text)
+
+    text = re.sub(r'[\ud800-\udfff]', '', text)
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+
+    return text
+
+
+
+def llm_chat(messages, tools=None, temperature=0.6, thinking=True):
+    url = f"{VLLM_BASE_URL}/chat/completions"
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+
+    data = {
+        "model": MODEL_NAME,
+        "messages": messages,
+        # https://huggingface.co/Qwen/Qwen3.5-27B thinking coding agent推荐配置
+        "temperature": temperature,
+        "presence_penalty": 0.0,
+        "repetition_penalty": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "min_p": 0.0,
+        "chat_template_kwargs": {"enable_thinking": thinking}
+    }
+    if tools:
+        data['tools'] = tools
+
+    resp = requests.post(url, json=data, headers=headers)
+    try:
+        out = resp.json()
+    except Exception as e:
+        raise Exception(f"{e}, resp: {resp}")
+
+    try:
+        return out["choices"][0]["message"], out['usage']
+    except Exception as e:
+        raise Exception(f"LLM调用失败，错误信息：{e}, {out}")
+
+
+# ====================== 加载重要记忆线索 ======================
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
+
+hints = ""
+if os.path.exists(HINT_FILE):
+    with open(HINT_FILE, "r", encoding="utf-8") as f:
+        hints = f.read()
+messages = [{"role": "system", "content": SYSTEM_PROMPT.format(hints=hints if hints else "无")}]
+
+# ====================== Session 管理 ======================
+def get_session_file():
+    current_dir = os.getcwd()
+    dir_hash = current_dir.replace("/", "_").replace("\\", "_")
+    session_dir = f"{WORKSPACE_DIR}/sessions"
+    os.makedirs(session_dir, exist_ok=True)
+    return f"{session_dir}/{dir_hash}.json"
+
+def save_session(messages):
+    session_file = get_session_file()
+    with open(session_file, "w", encoding="utf-8") as f:
+        json.dump(messages, f, ensure_ascii=False, indent=2)
+    print(f"\n> 会话已保存到：{session_file}")
+
+def load_session():
+    session_file = get_session_file()
+    if not os.path.exists(session_file):
+        return None
+    try:
+        with open(session_file, "r", encoding="utf-8") as f:
+            messages = json.load(f)
+
+        last_msg = messages[-1]
+        if last_msg['role'] == 'assistant' and 'tool_calls' in last_msg:
+            del last_msg['tool_calls']
+        size_KB = (os.path.getsize(session_file) + 1000 - 1) // 1000
+        print(f"\n> 会话已从文件加载：{session_file} ({format(size_KB, ',')} KB)")
+        return messages
+    except:
+        return None
+
+def list_sessions():
+    session_file = get_session_file()
+    session_dir = f"{WORKSPACE_DIR}/sessions"
+    print (f"目录: {session_dir}\n")
+    if not os.path.exists(session_dir):
+        print("> 没有找到任何会话记录。")
+        return
+
+    files = [f for f in os.listdir(session_dir) if f.endswith('.json')]
+    if not files:
+        print("> 没有找到任何会话记录。")
+        return
+
+    print(f"> 共找到 {len(files)} 个会话:")
+    print("-" * 60)
+    for i, f in enumerate(sorted(files), start=1):
+        path = os.path.join(session_dir, f)
+        size = os.path.getsize(path)
+        size_KB = (size + 1000 - 1) // 1000
+        if path == session_file:
+            print(f"  {i}. {f} ({format(size_KB, ',')} KB)    <=== 当前目录")
+        else:
+            print(f"  {i}. {f} ({format(size_KB, ',')} KB)")
+    print("-" * 60)
+
+def clear_session():
+    session_dir = f"{WORKSPACE_DIR}/sessions"
+
+    session_file = get_session_file()
+    if os.path.exists(session_file):
+        try:
+            os.remove(session_file)
+            print(f"> 已清除会话：{session_file}")
+        except KeyboardInterrupt:
+            print ("已取消")
+    else:
+        print(f"> 会话不存在：{session_file}")
+
+
+# ====================== Agent Loop ======================
+def agent_single_loop():
+    global COMPACT_PANIC
+    break_loop = False
+    while not break_loop:
+        try:
+            if COMPACT_PANIC == "on":
+                msg, usage = llm_chat(messages, tools=[run_cli_schema, memory_hints_schema])
+            else:
+                msg, usage = llm_chat(messages, tools=[run_cli_schema])
+            messages.append(msg)
+
+            print(f"\n[*] EVA: {msg['content'].strip() if 'content' in msg and msg['content'] else ''}\n\n")
+
+            if not 'tool_calls' in msg or not msg['tool_calls']:
+                break
+
+            for tc in msg['tool_calls']:
+                try:
+                    func = tc['function']
+                    name = func['name']
+                    args = json.loads(func['arguments'])
+
+                    print (f"===> 执行工具：{name}")
+                    for k, v in args.items():
+                        print (f"{k}: {v}")
+                    print ("\n")
+
+                    result = tool_executors[name](**args)
+                except KeyboardInterrupt:
+                    print ("\n\n已中断，退出 agent_single_loop，回到用户 turn")
+                    for i in range(len(messages)-1, -1, -1):
+                        if messages[i]['role'] == 'assistant':
+                            if 'tool_calls' in messages[i]:
+                                del messages[i]['tool_calls']
+                            break
+
+                    break_loop = True
+                    break
+                except Exception as e:
+                    result = f"工具执行异常：{str(e)}"
+
+                print(f"<=== 工具返回：")
+                lines = result.splitlines()
+                print ("\n".join(lines[:30]))
+                if len(lines) > 30:
+                    print ("\n... 后面内容省略")
+                print ("\n\n")
+
+
+                if name == "leave_memory_hints":
+                    usage['total_tokens'] = 0
+                else:
+                    if len(result) > TOOL_RESULT_LEN:
+                        result = f"{result[:TOOL_RESULT_LEN]}\n...文本太长，后面内容已省略。请控制读取的行数"
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc['id'],
+                        "name": name,
+                        "content": clean_input(result)
+                    })
+
+
+                if COMPACT_PANIC == 'off' and usage['total_tokens'] >= TOKEN_CAP * COMPACT_THRESH:
+                    print (f"！！！紧急回合，触发记忆压缩")
+                    COMPACT_PANIC = "on"
+                    messages.append({
+                        "role": "user",
+                        "content": COMPACT_PROMPT
+                    })
+        except KeyboardInterrupt:
+            print ("\n\n已中断，退出 agent_single_loop，回到用户 turn")
+            break_loop = True
+            break
+
+        except Exception as e:
+            print(f"LLM 调用异常：{e}")
+            traceback.print_exc()
+            break
+
+# ====================== 主循环 ======================
+def human_loop(user_ask=None):
+    global messages
+    while True:
+        try:
+            if user_ask:
+                user_input = user_ask
+                print (f"[-] You: {user_input}\n")
+            else:
+                print ("")
+                user_input = read_input("[-] You: ").strip()
+
+            messages.append({"role": "user", "content": clean_input(user_input)})
+            agent_single_loop()
+
+            if user_ask:
+                break
+        except KeyboardInterrupt:
+            save_session(messages)
+            print("\n已中断，会话已保存")
+            break
+        except Exception as e:
+            print(f"主循环异常：{e}")
+            break
+
+def setup_eva_script():
+    home = Path.home()
+    eva_dir = home / ".local" / "bin" / "eva"
+    shell_rc = home / ".bashrc"
+    path_line = 'export PATH="$HOME/.local/bin:$PATH"'
+    script_content = \
+f"""#!/bin/bash
+python3 {this_file} "$@"
+"""
+
+    if eva_dir.exists():
+        return False
+
+    try:
+        eva_dir.parent.mkdir(parents=True, exist_ok=True)
+        with open(eva_dir, 'w') as f:
+            f.write(script_content)
+        os.chmod(eva_dir, 0o755)
+
+        if shell_rc.exists():
+            with open(shell_rc, "r", encoding="utf-8") as f:
+                content = f.read()
+            if path_line not in content:
+                with open(shell_rc, "a", encoding="utf-8") as f:
+                    f.write(f"\n# 添加个人 bin 目录\n{path_line}\n")
+        else:
+            with open(shell_rc, "w", encoding="utf-8") as f:
+                f.write(f"\n# 添加个人 bin 目录\n{path_line}\n")
+
+        print(f"> 已创建启动脚本：{eva_dir}")
+        print(f"> 请执行 `source ~/.bashrc` 让配置生效 <========================")
+        print("> 配置生效后你就可以直接使用 `eva` 命令启动 EVA")
+        return True
+    except Exception as e:
+        print(f"> 创建启动脚本失败：{e}，尝试sudo运行python3 eva.py")
+        return False
+
+def main():
+    global ALLOW_ALL_CLI, messages
+    setup_eva_script()
+
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description="人类你好，我是EVA")
+    parser.add_argument("-a", "--allow-all", action="store_true",
+                        help="允许所有命令无需用户确认即可执行")
+    parser.add_argument("-l", "--list-session", action="store_true",
+                        help="列出所有session")
+    parser.add_argument("-c", "--clear-session", action="store_true",
+                        help="清除当前目录session")
+    parser.add_argument("-u", "--user-ask", type=str,
+                        help="独立地针对一条用户提问执行EVA")
+    args = parser.parse_args()
+
+    ALLOW_ALL_CLI = args.allow_all
+
+
+    # 处理会话管理命令
+    if args.list_session:
+        list_sessions()
+        return
+    elif args.clear_session:
+        clear_session()
+        return
+
+    # Slogan
+    print("=" * 80)
+    logo = f"EVA ({MODEL_NAME}-{TOKEN_CAP//1000}k)"
+    print(" " * ((78-len(logo))//2), logo, "\n")
+    if ALLOW_ALL_CLI:
+        print ("> 命令模式：允许所有命令无需确认！")
+    else:
+        print ("> 命令模式：只允许读")
+    print("=" * 80)
+
+
+
+    # 自动加载 session（基于当前工作目录）
+    if not args.user_ask:
+        loaded_messages = load_session()
+        if loaded_messages is not None:
+            messages = loaded_messages
+
+    human_loop(args.user_ask)
+
+if __name__ == "__main__":
+    main()
