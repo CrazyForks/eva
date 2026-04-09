@@ -13,9 +13,10 @@ this_file = str(Path(__file__).resolve())
 this_dir = Path(__file__).resolve().parent
 
 # ========================= 配置区 =========================
+# LLM请求参数是按thinking模型设置的，所以请务必使用*thinking模型*，如deepseek-reasoner、Qwen3.5等
 VLLM_BASE_URL = "https://api.deepseek.com/v1"
-MODEL_NAME = "deepseek-chat"
-API_KEY = "sk-xxxxxxxxxxxx"
+MODEL_NAME = "deepseek-reasoner"
+API_KEY = "sk-这里填你的deepseek API key"
 
 
 def detect_model_len():
