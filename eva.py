@@ -274,6 +274,8 @@ def load_session():
         last_msg = messages[-1]
         if last_msg['role'] == 'assistant' and 'tool_calls' in last_msg:
             del last_msg['tool_calls']
+            if not last_msg['content']:
+                del messages[-1]
         size_KB = (os.path.getsize(session_file) + 1000 - 1) // 1000
         print(f"\n> 会话已从文件加载：{session_file} ({format(size_KB, ',')} KB)")
         return messages
