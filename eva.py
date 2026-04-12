@@ -267,80 +267,86 @@ def llm_chat_stream(messages, tools=None, temperature=0.6, thinking=True):
     is_first_content = True
     is_thinking = False
 
-    for raw_line in resp.iter_lines():
-        if not raw_line:
-            continue
-        line = raw_line.decode('utf-8', errors='replace')
-        if not line.startswith('data: '):
-            continue
-        payload = line[6:]
-        if payload.strip() == '[DONE]':
-            break
+    try:
+        for raw_line in resp.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode('utf-8', errors='replace')
+            if not line.startswith('data: '):
+                continue
+            payload = line[6:]
+            if payload.strip() == '[DONE]':
+                break
 
-        try:
-            chunk = json.loads(payload)
-        except json.JSONDecodeError:
-            continue
+            try:
+                chunk = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
 
-        # 提取 usage（最后一个 chunk 带 usage）
-        if 'usage' in chunk and chunk['usage']:
-            usage = chunk['usage']
+            # 提取 usage（最后一个 chunk 带 usage）
+            if 'usage' in chunk and chunk['usage']:
+                usage = chunk['usage']
 
-        choices = chunk.get('choices', [])
-        if not choices:
-            continue
+            choices = chunk.get('choices', [])
+            if not choices:
+                continue
 
-        delta = choices[0].get('delta', {})
-        if not delta:
-            continue
+            delta = choices[0].get('delta', {})
+            if not delta:
+                continue
 
-        if 'role' in delta:
-            role = delta['role']
+            if 'role' in delta:
+                role = delta['role']
 
-        # ---- reasoning / thinking 内容 ----
-        reasoning_content = delta.get('reasoning_content') or delta.get('reasoning') or ''
-        if reasoning_content:
-            if not is_thinking:
-                is_thinking = True
-                sys.stdout.write('\033[2m💭 ')  # 暗色显示思考过程
-            sys.stdout.write(reasoning_content)
+            # ---- reasoning / thinking 内容 ----
+            reasoning_content = delta.get('reasoning_content') or delta.get('reasoning') or ''
+            if reasoning_content:
+                if not is_thinking:
+                    is_thinking = True
+                    sys.stdout.write('\033[2m💭 ')  # 暗色显示思考过程
+                sys.stdout.write(reasoning_content)
+                sys.stdout.flush()
+                reasoning_parts.append(reasoning_content)
+
+            # ---- 正文内容 ----
+            text = delta.get('content') or ''
+            if text:
+                if is_thinking:
+                    is_thinking = False
+                    sys.stdout.write('\033[0m\n')  # 结束暗色
+                if is_first_content:
+                    is_first_content = False
+                sys.stdout.write(text)
+                sys.stdout.flush()
+                content_parts.append(text)
+
+            # ---- tool_calls 增量 ----
+            if 'tool_calls' in delta:
+                for tc_delta in delta['tool_calls']:
+                    idx = tc_delta.get('index', 0)
+                    if idx not in tool_calls_map:
+                        tool_calls_map[idx] = {
+                            'id': tc_delta.get('id', ''),
+                            'type': 'function',
+                            'function': {'name': '', 'arguments': ''}
+                        }
+                    tc_entry = tool_calls_map[idx]
+                    if tc_delta.get('id'):
+                        tc_entry['id'] = tc_delta['id']
+                    func_delta = tc_delta.get('function', {})
+                    if func_delta.get('name'):
+                        tc_entry['function']['name'] += func_delta['name']
+                    if func_delta.get('arguments'):
+                        tc_entry['function']['arguments'] += func_delta['arguments']
+
+        # 正常结束时重置颜色（Ctrl+C 时 finally 也会执行此逻辑）
+        if is_thinking:
+            sys.stdout.write('\033[0m\n')
+    finally:
+        # Ctrl+C 中断时也要重置颜色，避免终端保持暗色
+        if is_thinking:
+            sys.stdout.write('\033[0m\n')
             sys.stdout.flush()
-            reasoning_parts.append(reasoning_content)
-
-        # ---- 正文内容 ----
-        text = delta.get('content') or ''
-        if text:
-            if is_thinking:
-                is_thinking = False
-                sys.stdout.write('\033[0m\n')  # 结束暗色
-            if is_first_content:
-                is_first_content = False
-            sys.stdout.write(text)
-            sys.stdout.flush()
-            content_parts.append(text)
-
-        # ---- tool_calls 增量 ----
-        if 'tool_calls' in delta:
-            for tc_delta in delta['tool_calls']:
-                idx = tc_delta.get('index', 0)
-                if idx not in tool_calls_map:
-                    tool_calls_map[idx] = {
-                        'id': tc_delta.get('id', ''),
-                        'type': 'function',
-                        'function': {'name': '', 'arguments': ''}
-                    }
-                tc_entry = tool_calls_map[idx]
-                if tc_delta.get('id'):
-                    tc_entry['id'] = tc_delta['id']
-                func_delta = tc_delta.get('function', {})
-                if func_delta.get('name'):
-                    tc_entry['function']['name'] += func_delta['name']
-                if func_delta.get('arguments'):
-                    tc_entry['function']['arguments'] += func_delta['arguments']
-
-    # 结束暗色（如果还在 thinking 状态）
-    if is_thinking:
-        sys.stdout.write('\033[0m\n')
 
     # 组装最终 message（与非流式返回格式一致）
     full_content = ''.join(content_parts)
