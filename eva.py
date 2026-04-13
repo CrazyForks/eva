@@ -482,19 +482,16 @@ def agent_single_loop():
                     result = tool_executors[name](**args)
                 except KeyboardInterrupt:
                     print ("\n\n已中断，退出 agent_single_loop，回到用户 turn")
-                    for i in range(len(messages)-1, -1, -1):
-                        if messages[i]['role'] == 'assistant':
-                            if 'tool_calls' in messages[i]:
-                                del messages[i]['tool_calls']
-                            break
-
+                    result = f"用户中止该工具运行"
                     break_loop = True
-                    break
                 except Exception as e:
                     result = f"工具执行异常：{str(e)}"
 
                 print(f"<=== 工具返回：")
-                lines = result.splitlines()
+                if len(result) > 6000:
+                    lines = f"{result[:6000]}\n... 后面内容省略".splitlines()
+                else:
+                    lines = result.splitlines()
                 print ("\n".join(lines[:30]))
                 if len(lines) > 30:
                     print ("\n... 后面内容省略")
