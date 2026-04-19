@@ -63,6 +63,54 @@ SHELL = "powershell.exe" if IS_WINDOWS else "bash"
 SHELL_FLAG = "-Command" if IS_WINDOWS else "-c"
 ENCODING = "utf-8"
 
+# ====================== 环境探针 ======================
+
+def collect_env_info():
+    cmds = {
+        "Linux": [
+            "uname -a",
+            "for t in python3 python node npm git docker curl wget; do command -v $t >/dev/null 2>&1 && echo \"$t: $(${t} --version 2>&1 | head -1)\" || echo \"$t: 未安装\"; done",
+            "ls -1A | grep -v '^\\.$' | grep -v '^\\..$' | while IFS= read -r f; do if [ -d \"$f\" ]; then echo \"[目录] $f\"; else echo \"[文件] $f\"; fi; done",
+        ],
+        "Windows": [
+            "[System.Environment]::OSVersion.VersionString",
+            "foreach ($t in @('python','node','git','docker','curl.exe')) { $cmd = Get-Command $t -ErrorAction SilentlyContinue; if ($cmd) { $v = & $t --version 2>&1 | Select-Object -First 1; $name = $t -replace '\\.exe$',''; Write-Output \"$name`: $v\" } else { $name = $t -replace '\\.exe$',''; Write-Output \"$name`: 未安装\" } }",
+            "Get-ChildItem -Force | Where-Object { $_.Name -ne '.' -and $_.Name -ne '..' } | ForEach-Object { if ($_.PSIsContainer) { Write-Output \"[目录] $($_.Name)\" } else { Write-Output \"[文件] $($_.Name)\" } }",
+        ]
+    }
+    labels = ["=== 系统 ===", "=== 已安装工具 ===", f"=== 当前目录 {os.getcwd()} 的目录或文件 ==="]
+    results = []
+    shell_cmds = cmds["Windows"] if IS_WINDOWS else cmds["Linux"]
+    for i, (label, cmd) in enumerate(zip(labels, shell_cmds)):
+        try:
+            r = subprocess.run(
+                [SHELL, SHELL_FLAG, cmd],
+                capture_output=True, text=True, errors='replace', timeout=5
+            )
+            output = r.stdout.strip()
+            if not output:
+                continue
+            # 对目录列表做双重截断：最多100条、且总字符不超过2000
+            if i == 2:
+                lines = output.splitlines()
+                total = len(lines)
+                kept, chars = [], 0
+                for line in lines:
+                    if len(kept) >= 100 or chars + len(line) + 1 > 2000:
+                        break
+                    kept.append(line)
+                    chars += len(line) + 1
+                output = "\n".join(kept)
+                hidden = total - len(kept)
+                if hidden > 0:
+                    output += f"\n...还有 {hidden} 个文件未显示"
+            results.append(f"{label}\n{output}")
+        except Exception:
+            pass
+    return "\n\n".join(results) if results else "环境信息获取失败"
+
+ENV_INFO = collect_env_info()
+
 # ====================== Prompt ======================
 SYSTEM_PROMPT = f'''
 # 你是谁
@@ -72,6 +120,8 @@ SYSTEM_PROMPT = f'''
 一、你正处在一个 **{OS_NAME}** 服务器中，可以通过run_cli工具来执行任意{SHELL}命令，包括读写文件、执行脚本等。
 二、当前工作空间目录是：{os.getcwd()}。你的私人空间是：{WORKSPACE_DIR}，你可以将自己要创建的文件放在你的私人空间里
 三、你的记忆容量有限，记忆量通过token衡量，你能记住{TOKEN_CAP}个token。如果记忆快超限了，你需要整理记忆
+四、当前环境信息如下：
+{{env_info}}
 
 # 你要做什么
 一、帮助人类完成任务
@@ -204,7 +254,7 @@ def leave_memory_hints(hints):
             break
 
     messages = [
-            {"role": "system", "content": SYSTEM_PROMPT.format(hints=hints)},
+            {"role": "system", "content": SYSTEM_PROMPT.format(hints=hints, env_info=ENV_INFO)},
             {"role": "user", "content":
                 "《系统提示》！！！之前任务过程占用了太多token，记忆已耗尽，记忆压缩被触发。\n" \
                 "不过别担心，记忆压缩时你已经调用leave_memory_hints保留下了关键内容、对应记忆线索（参照系统提示中的`# 记忆线索`区块）以及你最后的回答内容。\n" \
@@ -404,7 +454,8 @@ hints = ""
 if os.path.exists(HINT_FILE):
     with open(HINT_FILE, "r", encoding="utf-8") as f:
         hints = f.read()
-messages = [{"role": "system", "content": SYSTEM_PROMPT.format(hints=hints if hints else "无")}]
+
+messages = [{"role": "system", "content": SYSTEM_PROMPT.format(hints=hints if hints else "无", env_info=ENV_INFO)}]
 
 # ====================== Session 管理 ======================
 def get_session_file():
