@@ -465,6 +465,42 @@ def get_session_file():
     os.makedirs(session_dir, exist_ok=True)
     return f"{session_dir}/{dir_hash}.json"
 
+def get_lock_file():
+    session_file = get_session_file()
+    return session_file.replace(".json", ".lock")
+
+def acquire_lock():
+    lock_file = get_lock_file()
+    if os.path.exists(lock_file):
+        try:
+            with open(lock_file, "r") as f:
+                pid = int(f.read().strip())
+            # 检查该 PID 是否仍在运行
+            if IS_WINDOWS:
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}"],
+                    capture_output=True, text=True
+                )
+                alive = str(pid) in result.stdout
+            else:
+                alive = os.path.exists(f"/proc/{pid}")
+            if alive:
+                print(f"错误：该目录已有 EVA 实例正在运行（PID: {pid}），不允许重复启动。")
+                print(f"如需强制启动，请先删除锁文件：{lock_file}")
+                sys.exit(1)
+        except (ValueError, Exception):
+            pass  # lock 文件损坏，直接覆盖
+    with open(lock_file, "w") as f:
+        f.write(str(os.getpid()))
+
+def release_lock():
+    lock_file = get_lock_file()
+    try:
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
+    except Exception:
+        pass
+
 def save_session(messages):
     session_file = get_session_file()
     with open(session_file, "w", encoding="utf-8") as f:
@@ -629,10 +665,12 @@ def human_loop(user_ask=None):
                 break
         except KeyboardInterrupt:
             save_session(messages)
+            release_lock()
             print("\n已中断，会话已保存")
             break
         except Exception as e:
             print(f"主循环异常：{e}")
+            release_lock()
             break
 
 def setup_eva_script():
@@ -701,6 +739,7 @@ def main():
         return
 
     # Slogan
+    acquire_lock()
     print("=" * 80)
     logo = f"EVA ({EVA_MODEL_NAME}-{TOKEN_CAP//1000}k)"
     print(" " * ((78-len(logo))//2), logo, "\n")
