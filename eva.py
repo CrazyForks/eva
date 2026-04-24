@@ -16,7 +16,7 @@ this_dir = _resolved.parent
 # ========================= LLM配置区 =========================
 # LLM请求参数是按thinking模型设置的，所以请务必使用*thinking模型*，如deepseek-reasoner、Qwen3.5等
 EVA_BASE_URL = os.environ.get("EVA_BASE_URL", "https://api.deepseek.com/v1")
-EVA_MODEL_NAME = os.environ.get("EVA_MODEL_NAME", "deepseek-reasoner")
+EVA_MODEL_NAME = os.environ.get("EVA_MODEL_NAME", "deepseek-v4-flash")
 EVA_API_KEY = os.environ.get("EVA_API_KEY", "sk-这里填你的deepseek API key")
 
 def detect_model_len():
@@ -173,7 +173,7 @@ run_cli_schema = {
                 "type": "object",
                 "properties": {
                     "command": {"type": "string"},
-                    "timeout": {"type": "integer", "default": 30}
+                    "timeout": {"type": "integer", "default": 300}
                 },
                 "required": ["command"]
             }
@@ -207,7 +207,7 @@ def read_input(prompt=""):
     except EOFError:
         return ""
 
-def run_cli(command: str, timeout: int = 30):
+def run_cli(command: str, timeout: int = 300):
     global ALLOW_ALL_CLI
     try:
         if not ALLOW_ALL_CLI:
@@ -300,7 +300,8 @@ def _build_request_data(messages, tools=None, temperature=0.6, thinking=True, st
         "top_p": 0.95,
         "top_k": 20,
         "min_p": 0.0,
-        "chat_template_kwargs": {"enable_thinking": thinking}
+        "chat_template_kwargs": {"enable_thinking": thinking}, # vLLM
+        "thinking": {"type": "enabled" if thinking else "disabled"} # deepseek
     }
     if tools:
         data['tools'] = tools
@@ -585,7 +586,8 @@ def agent_single_loop():
                     usage['total_tokens'] = 0
                 else:
                     if len(result) > TOOL_RESULT_LEN:
-                        result = f"{result[:TOOL_RESULT_LEN]}\n...文本太长，后面内容已省略。请控制读取的行数"
+                        half = TOOL_RESULT_LEN // 2
+                        result = result[:half] + "\n...（工具返回内容太多，中间内容已省略）...\n" + result[-half:]
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc['id'],
