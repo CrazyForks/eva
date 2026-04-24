@@ -126,6 +126,7 @@ SYSTEM_PROMPT = f'''
 一、帮助人类完成任务
 二、接收到任务时需要自己检查记忆线索中是否有相应技能或知识。若有，请务必使用记忆线索中的对应技能和知识
 三、任务未完成前必须调用run_cli工具，直到完成任务
+四、认为任务完成时，主动验证结果是否符合预期，确认无误后再结束
 
 # 工具调用说明
 一、调用run_cli工具时注意{OS_NAME}系统上{SHELL}命令的语法正确性，例如命令连接符、$特殊符号等，不要弄错
@@ -247,6 +248,15 @@ def leave_memory_hints(hints):
             last_user_i = i
             break
 
+    # 对保留片段中的 tool result 做截断、删除 reasoning_content，避免压缩后体积依然过大
+    kept = []
+    for m in messages[last_user_i:compact_i]:
+        if m['role'] == 'tool' and m.get('content') and len(m['content']) > 200:
+            m = {**m, 'content': m['content'][:200] + '…（内容过长已压缩）'}
+        elif m['role'] == 'assistant' and 'reasoning_content' in m:
+            m = {k: v for k, v in m.items() if k != 'reasoning_content'}
+        kept.append(m)
+
     messages = [
             {"role": "system", "content": SYSTEM_PROMPT.format(hints=hints, env_info=ENV_INFO)},
             {"role": "user", "content":
@@ -254,7 +264,7 @@ def leave_memory_hints(hints):
                 "不过别担心，记忆压缩时你已经调用leave_memory_hints保留下了关键内容、对应记忆线索（参照系统提示中的`# 记忆线索`区块）以及你最后的回答内容。\n" \
                 "======== 最后的回答内容，开始 ========"
             }
-        ] + messages[last_user_i:compact_i] + [
+        ] + kept + [
                 {"role": "user", "content":
                     "======== 最后的回答内容，结束 ========\n" \
                     "请开始确认你自己的任务状态，继续完成任务\n"
@@ -608,6 +618,8 @@ def human_loop(user_ask=None):
             else:
                 print("")
                 user_input = read_input("[-] You: ").strip()
+                if not user_input:
+                    continue
 
             messages.append({"role": "user", "content": clean_input(user_input)})
             agent_single_loop()
