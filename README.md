@@ -2,7 +2,7 @@
 
 如果一个智能体的执行层小到只是一个脚本，那它具有病毒传播一样的潜力。
 
-EVA是个麻雀虽小、五脏俱全的Agent智能体，相当于低配版CC，能帮你写脚本、写测试案例、执行shell、分析数据等。
+EVA是个麻雀虽小、五脏俱全的Agent智能体，相当于低配版Claude Code，能帮你写脚本、写测试案例、执行shell、分析数据等。
 
 
 ## 特性
@@ -73,7 +73,7 @@ hints.md文件内容示例：
 通过 Skill & Command，可以扩展EVA的各种能力。
 
 
-## 关于Contribution
+## 关于Contributing
 
 💗💗💗
 
