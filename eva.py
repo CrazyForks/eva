@@ -530,8 +530,8 @@ def clear_session():
         try:
             os.remove(session_file)
             print(f"> 已清除会话：{session_file}")
-        except KeyboardInterrupt:
-            print("已取消")
+        except Exception as e:
+            print(f"> 清除会话失败：{e}")
     else:
         print(f"> 会话不存在：{session_file}")
 
