@@ -611,7 +611,7 @@ def agent_single_loop():
             break
 
 # ====================== 主循环 ======================
-def human_loop(user_ask=None):
+def human_loop(user_ask=None, save_after=False):
     global messages
     while True:
         try:
@@ -628,6 +628,8 @@ def human_loop(user_ask=None):
             agent_single_loop()
 
             if user_ask:
+                if save_after:
+                    save_session(messages)
                 break
         except KeyboardInterrupt:
             save_session(messages)
@@ -680,6 +682,8 @@ def main():
                         help="清除当前目录session")
     parser.add_argument("-u", "--user-ask", type=str,
                         help="独立地针对一条用户提问执行EVA")
+    parser.add_argument("-s", "--with-session", action="store_true",
+                        help="搭配-u使用，载入并保存session")
     args = parser.parse_args()
 
     ALLOW_ALL_CLI = args.allow_all
@@ -702,12 +706,12 @@ def main():
     print("=" * 80)
 
     # 自动加载 session（基于当前工作目录）
-    if not args.user_ask:
+    if not args.user_ask or args.with_session:
         loaded_messages = load_session()
         if loaded_messages is not None:
             messages = loaded_messages
 
-    human_loop(args.user_ask)
+    human_loop(args.user_ask, save_after=args.with_session)
 
 if __name__ == "__main__":
     main()
