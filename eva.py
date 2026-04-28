@@ -644,26 +644,25 @@ def setup_eva_script():
     shell_rc = home / ".bashrc"
     path_line = 'export PATH="$HOME/.local/bin:$PATH"'
 
-    if eva_dir.exists():
-        return False
-
     try:
-        eva_dir.parent.mkdir(parents=True, exist_ok=True)
-        eva_dir.write_text(f"#!/bin/bash\npython3 {this_file} \"$@\"\n")
-        os.chmod(eva_dir, 0o755)
+        if not eva_dir.exists():
+            eva_dir.parent.mkdir(parents=True, exist_ok=True)
+            eva_dir.write_text(f"#!/bin/bash\npython3 {this_file} \"$@\"\n")
+            os.chmod(eva_dir, 0o755)
+            print(f"> 已创建启动脚本：{eva_dir}")
 
         content = shell_rc.read_text(encoding="utf-8") if shell_rc.exists() else ""
         if path_line not in content:
             with shell_rc.open("a", encoding="utf-8") as f:
                 f.write(f"\n# 添加个人 bin 目录\n{path_line}\n")
+            print(f"> 已将 PATH 配置写入 ~/.bashrc")
 
-        print(f"> 已创建启动脚本：{eva_dir}")
-        print(f"> 请执行 `source ~/.bashrc` 让配置生效 <========================")
-        print("> 配置生效后你就可以直接使用 `eva` 命令启动 EVA")
-        return True
+        if str(eva_dir.parent) not in os.environ.get("PATH", ""):
+            print(f"> 请执行 `source ~/.bashrc` 让配置生效 <========================")
+            print("> 配置生效后你就可以直接使用 `eva` 命令启动 EVA")
+
     except Exception as e:
         print(f"> 创建启动脚本失败：{e}，尝试sudo运行python3 eva.py")
-        return False
 
 def main():
     global ALLOW_ALL_CLI, messages
