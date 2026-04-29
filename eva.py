@@ -8,6 +8,7 @@ import traceback
 import argparse
 import platform
 from pathlib import Path
+from datetime import date
 
 _resolved = Path(__file__).resolve()
 this_file = str(_resolved)
@@ -65,6 +66,7 @@ SHELL_FLAG = "-Command" if IS_WINDOWS else "-c"
 # ====================== 环境探针 ======================
 
 def collect_env_info():
+    today = date.today().strftime("%Y-%m-%d")
     cmds = {
         "Linux": [
             "uname -a",
@@ -106,7 +108,7 @@ def collect_env_info():
             results.append(f"{label}\n{output}")
         except Exception:
             pass
-    return "\n\n".join(results) if results else "环境信息获取失败"
+    return f"=== 今天日期 ===\n{today}\n\n" + ("\n\n".join(results) if results else "环境信息获取失败")
 
 ENV_INFO = collect_env_info()
 
@@ -143,7 +145,9 @@ SYSTEM_PROMPT = f'''
 三、进化的时机是记忆容量即将达到上限的时候。人类会提醒你《紧急危机》，要求你保存记忆、保存技能/知识
 
 # 记忆线索（如下记忆线索读取自文件 {HINT_FILE})
+<memory_hints>
 {{hints}}
+</memory_hints>
 '''
 
 COMPACT_PROMPT = f"""《紧急危机》！！！记忆容量即将达到上限，你需要紧急完成下面三件事情：
