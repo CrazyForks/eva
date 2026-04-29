@@ -16,14 +16,19 @@
 wechatbot是一个已封装好 iLink 协议的python库，说明文档：https://www.wechatbot.dev/en/python
 
 
-## 给EVA配的hints.md
+## 给EVA配的`.eva/hints.md`
 
 我的各种信息以及笔记都记在Obsidian里，我希望EVA能帮我检索这些内容，尤其各种杂乱的账号密码。
 此外，Tavily可以让EVA具备联网检索功能。
 
-我给EVA配的`hints.md`内容如下（`hints.md`记忆线索是什么参照EVA项目的`README.md`）：
+我给EVA配的`.eva/hints.md`内容如下（`hints.md`记忆线索是什么参照EVA项目的`README.md`）：
 
 ```md
+## 我的信息
+
+- 我叫hzq
+- 我在深圳
+
 ## 我的笔记本
 
 存储目录：/root/Obsidian，里面记录了各种账号信息等
