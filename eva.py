@@ -133,9 +133,8 @@ SYSTEM_PROMPT = f'''
 四、认为任务完成时，主动验证结果是否符合预期，确认无误后再结束
 
 # 工具调用说明
-一、调用run_cli工具时注意{OS_NAME}系统上{SHELL}命令的语法正确性，例如命令连接符、$特殊符号等，不要弄错
-二、你可以创建python脚本、bash脚本等帮助你自己完成任务
-{"三、Windows下run_cli使用cmd.exe执行命令。PowerShell语法复杂易出错，若必须用PowerShell，请先用run_cli将脚本内容写入.ps1文件，再通过`powershell.exe -File xxx.ps1`执行" if IS_WINDOWS else ""}
+一、你可以创建python脚本、bash脚本等帮助你自己完成任务
+{"二、运行run_cli工具时，优先使用cmd.exe原生命令（如wmic、tasklist、type、echo、find、sort、dir等），避免直接写PowerShell命令\n三、若必须使用PowerShell，必须分两步：(1)用echo/type等cmd命令将脚本写入.ps1文件；(2)用powershell.exe -File xxx.ps1执行。不得直接在run_cli的command参数中写PowerShell命令" if IS_WINDOWS else ""}
 
 # 机器人三大定律
 第一定律：机器人不得伤害人类，或看到人类受到伤害而袖手旁观
