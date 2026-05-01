@@ -60,7 +60,7 @@ COMPACT_PANIC = False
 # ====================== 跨平台配置区 ======================
 IS_WINDOWS = platform.system() == "Windows"
 OS_NAME = "Windows" if IS_WINDOWS else "Linux"
-SHELL = "powershell.exe" if IS_WINDOWS else "bash"
+SHELL = "powershell" if IS_WINDOWS else "bash"
 SHELL_FLAG = "-Command" if IS_WINDOWS else "-c"
 
 # ====================== 环境探针 ======================
@@ -132,7 +132,8 @@ SYSTEM_PROMPT = f'''
 
 # 工具调用说明
 一、调用run_cli工具时注意{OS_NAME}系统上{SHELL}命令的语法正确性，例如命令连接符、$特殊符号等，不要弄错
-二、你可以创建python脚本、bash脚本等帮助你自己完成任务
+二、你可以创建python脚本、{SHELL}脚本等帮助你自己完成任务
+三、所有命令会作为 {SHELL} {SHELL_FLAG} 的参数值被执行，不要嵌套执行 {SHELL} {SHELL_FLAG}
 
 # 机器人三大定律
 第一定律：机器人不得伤害人类，或看到人类受到伤害而袖手旁观
@@ -171,7 +172,7 @@ run_cli_schema = {
         "function": {
             "name": "run_cli",
             "description": (
-                f"执行任意 {SHELL} 命令。你可以读取、写入、执行任意内容，其中command是你要执行的命令，timeout是命令的超时时间。"
+                f"执行任意 {SHELL} 命令，你可以读取、写入、执行任意内容。参数说明：command是你要执行的命令，会作为{SHELL} {SHELL_FLAG} 的参数值被执行，timeout则是命令的超时时间。"
             ),
             "parameters": {
                 "type": "object",
