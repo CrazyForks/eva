@@ -60,8 +60,8 @@ COMPACT_PANIC = False
 # ====================== 跨平台配置区 ======================
 IS_WINDOWS = platform.system() == "Windows"
 OS_NAME = "Windows" if IS_WINDOWS else "Linux"
-SHELL = "powershell.exe" if IS_WINDOWS else "bash"
-SHELL_FLAG = "-Command" if IS_WINDOWS else "-c"
+SHELL = "cmd.exe" if IS_WINDOWS else "bash"
+SHELL_FLAG = "/c" if IS_WINDOWS else "-c"
 
 # ====================== 环境探针 ======================
 
@@ -84,8 +84,10 @@ def collect_env_info():
     shell_cmds = cmds["Windows"] if IS_WINDOWS else cmds["Linux"]
     for i, (label, cmd) in enumerate(zip(labels, shell_cmds)):
         try:
+            # Windows 环境探针依赖 powershell，不用 cmd
+            runner = ["powershell.exe", "-Command", cmd] if IS_WINDOWS else [SHELL, SHELL_FLAG, cmd]
             r = subprocess.run(
-                [SHELL, SHELL_FLAG, cmd],
+                runner,
                 capture_output=True, text=True, errors='replace', timeout=5
             )
             output = r.stdout.strip()
@@ -133,6 +135,7 @@ SYSTEM_PROMPT = f'''
 # 工具调用说明
 一、调用run_cli工具时注意{OS_NAME}系统上{SHELL}命令的语法正确性，例如命令连接符、$特殊符号等，不要弄错
 二、你可以创建python脚本、bash脚本等帮助你自己完成任务
+{"三、Windows下run_cli使用cmd.exe执行命令。PowerShell语法复杂易出错，若必须用PowerShell，请先用run_cli将脚本内容写入.ps1文件，再通过`powershell.exe -File xxx.ps1`执行" if IS_WINDOWS else ""}
 
 # 机器人三大定律
 第一定律：机器人不得伤害人类，或看到人类受到伤害而袖手旁观

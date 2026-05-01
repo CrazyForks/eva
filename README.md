@@ -11,7 +11,7 @@ EVA是个麻雀虽小、五脏俱全的Agent智能体，相当于低配版Claude
 - 极致轻量化：单文件，仅一个`eva.py`，有python就能运行
 - 目录级Session：下次同样目录启动会延续之前对话
 - 安全审查：默认只执行读命令，其他命令需要安全确认
-- 移植性：很容易将EVA接入你现有的自动化流程，例如：`eva -a -u '计算100w以内所有素数和并写到/tmp/result.txt'`
+- 移植性：很容易将EVA接入你现有的自动化流程，例如：`eva -au '计算100w以内所有素数和并写到/tmp/result.txt'`。当前就借助`-asu`选项将EVA接入了微信Bot
 
 
 ## 快速开始
@@ -57,6 +57,7 @@ eva支持的选项：
   -c, --clear-session   清除当前目录session
   -u USER_ASK, --user-ask USER_ASK
                         独立地针对一条用户提问执行EVA
+  -s, --with-session    搭配-u使用，载入并保存session
 ```
 
 ## EVA退出说明
