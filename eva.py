@@ -53,9 +53,9 @@ def detect_model_len():
 TOKEN_CAP = detect_model_len()
 COMPACT_THRESH = 3/4
 TOOL_RESULT_LEN = int(TOKEN_CAP / 20)
-WORKSPACE_DIR = f"{this_dir}/.eva"
-HINT_FILE = f"{WORKSPACE_DIR}/hints.md"
-SESSION_DIR = f"{WORKSPACE_DIR}/sessions"
+EVA_HOME = os.environ.get("EVA_HOME") or f"{this_dir}/.eva"
+HINT_FILE = f"{EVA_HOME}/hints.md"
+SESSION_DIR = f"{EVA_HOME}/sessions"
 ALLOW_ALL_CLI = False
 COMPACT_PANIC = False
 LAST_USAGE = None
@@ -122,7 +122,7 @@ SYSTEM_PROMPT = f'''
 
 # 你在哪
 一、你正处在一个 **{OS_NAME}** 服务器中，可以通过run_cli工具来执行任意{SHELL}命令，包括读写文件、执行脚本等。
-二、当前工作空间目录是：{os.getcwd()}。你的私人空间是：{WORKSPACE_DIR}，你可以将自己的临时脚本、临时文件放在你的私人空间里
+二、当前工作空间目录是：{os.getcwd()}。你的私人空间是：{EVA_HOME}，你可以将自己的临时脚本、临时文件放在你的私人空间里
 三、你的记忆容量有限，记忆量通过token衡量，你能记住{TOKEN_CAP}个token。如果记忆快超限了，你需要整理记忆
 四、当前环境信息如下：
 {{env_info}}
@@ -461,7 +461,7 @@ def llm_chat_stream(messages, tools=None, temperature=0.6, thinking=True):
 
 
 # ====================== 加载重要记忆线索 ======================
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
+os.makedirs(EVA_HOME, exist_ok=True)
 
 hints = Path(HINT_FILE).read_text(encoding="utf-8") if Path(HINT_FILE).exists() else ""
 messages = [{"role": "system", "content": SYSTEM_PROMPT.format(hints=hints or "无", env_info=ENV_INFO)}]
