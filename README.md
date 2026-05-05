@@ -4,6 +4,7 @@
 
 EVA是个麻雀虽小、五脏俱全的Agent智能体，相当于低配版Claude Code，能帮你写脚本、写测试案例、执行shell、分析数据等。
 
+各种好玩案例见当前仓库的 [showcase](./showcase) 🦖🦖🦖
 
 ## 特性
 
