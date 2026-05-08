@@ -3,10 +3,10 @@ import re
 import json
 import subprocess
 import sys
-import requests
-import traceback
 import argparse
 import platform
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import date
 
@@ -18,26 +18,41 @@ this_dir = _resolved.parent
 # LLM请求参数是按thinking模型设置的，所以请务必使用*thinking模型*，如deepseek-reasoner、Qwen3.5等
 EVA_BASE_URL = os.environ.get("EVA_BASE_URL", "https://api.deepseek.com/v1")
 EVA_MODEL_NAME = os.environ.get("EVA_MODEL_NAME", "deepseek-v4-flash")
-EVA_API_KEY = os.environ.get("EVA_API_KEY", "sk-这里填你的deepseek API key")
+EVA_API_KEY = os.environ.get("EVA_API_KEY")
+if not EVA_API_KEY:
+    print("错误：未设置 EVA_API_KEY 环境变量")
+    sys.exit(1)
 
 def detect_model_len():
     url = f"{EVA_BASE_URL}/models"
-    headers = {"Authorization": f"Bearer {EVA_API_KEY}"}
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {EVA_API_KEY}"})
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            status = resp.status
+            body = resp.read().decode('utf-8', errors='replace')
     except UnicodeEncodeError:
-        print(f"错误：EVA_API_KEY ({EVA_API_KEY}) 包含非法字符，请检查 EVA_API_KEY 配置。")
+        print("错误：EVA_API_KEY 包含非 ASCII 字符，请检查 EVA_API_KEY 配置。")
         sys.exit(1)
+    except urllib.error.HTTPError as e:
+        status = e.code
+        body = e.read().decode('utf-8', errors='replace')
     except Exception as e:
         print(f"错误：无法连接到 {EVA_BASE_URL}，请检查 EVA_BASE_URL 配置。\n详情：{e}")
         sys.exit(1)
-    if resp.status_code == 401:
+
+    if status == 401:
         print("错误：API Key 无效或未授权，请检查 EVA_API_KEY 配置。")
         sys.exit(1)
-    if resp.status_code != 200:
-        print(f"错误：获取模型列表失败（HTTP {resp.status_code}）：{resp.text[:200]}")
+    if status != 200:
+        print(f"错误：获取模型列表失败（HTTP {status}）：{body[:200]}")
         sys.exit(1)
-    out = resp.json()
+
+    try:
+        out = json.loads(body)
+    except json.JSONDecodeError:
+        print(f"错误：获取模型列表返回了非法 JSON：{body[:200]}")
+        sys.exit(1)
+
     for d in out['data']:
         if d['id'] == EVA_MODEL_NAME:
             return d.get("max_model_len", {
@@ -334,14 +349,18 @@ def display_usage(usage, cap):
 
 def llm_chat(messages, tools=None, temperature=0.6, thinking=True):
     url = f"{EVA_BASE_URL}/chat/completions"
-    headers = {"Authorization": f"Bearer {EVA_API_KEY}"}
     data = _build_request_data(messages, tools, temperature, thinking, stream=False)
-
-    resp = requests.post(url, json=data, headers=headers)
+    body = json.dumps(data).encode('utf-8')
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Authorization": f"Bearer {EVA_API_KEY}", "Content-Type": "application/json"}
+    )
     try:
-        out = resp.json()
-    except Exception as e:
-        raise Exception(f"{e}, resp: {resp}")
+        with urllib.request.urlopen(req) as resp:
+            out = json.loads(resp.read().decode('utf-8', errors='replace'))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode('utf-8', errors='replace')
+        raise Exception(f"HTTP {e.code}: {raw}")
 
     try:
         return out["choices"][0]["message"], out['usage']
@@ -351,12 +370,17 @@ def llm_chat(messages, tools=None, temperature=0.6, thinking=True):
 
 def llm_chat_stream(messages, tools=None, temperature=0.6, thinking=True):
     url = f"{EVA_BASE_URL}/chat/completions"
-    headers = {"Authorization": f"Bearer {EVA_API_KEY}"}
     data = _build_request_data(messages, tools, temperature, thinking, stream=True)
-
-    resp = requests.post(url, json=data, headers=headers, stream=True)
-    if resp.status_code != 200:
-        raise Exception(f"LLM调用失败，HTTP {resp.status_code}: {resp.text[:500]}")
+    body = json.dumps(data).encode('utf-8')
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Authorization": f"Bearer {EVA_API_KEY}", "Content-Type": "application/json"}
+    )
+    try:
+        resp = urllib.request.urlopen(req)
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode('utf-8', errors='replace')
+        raise Exception(f"LLM调用失败，HTTP {e.code}: {raw[:500]}")
 
     # 累积变量
     content_parts = []
@@ -367,10 +391,10 @@ def llm_chat_stream(messages, tools=None, temperature=0.6, thinking=True):
     is_thinking = False
 
     try:
-        for raw_line in resp.iter_lines():
-            if not raw_line:
+        for raw_line in resp:
+            line = raw_line.decode('utf-8', errors='replace').rstrip('\r\n')
+            if not line:
                 continue
-            line = raw_line.decode('utf-8', errors='replace')
             if not line.startswith('data: '):
                 continue
             payload = line[6:]
@@ -438,6 +462,7 @@ def llm_chat_stream(messages, tools=None, temperature=0.6, thinking=True):
         if is_thinking:
             sys.stdout.write('\033[0m\n')
     finally:
+        resp.close()
         if is_thinking:
             sys.stdout.write('\033[0m\n')
             sys.stdout.flush()
@@ -631,7 +656,6 @@ def agent_single_loop():
 
         except Exception as e:
             print(f"LLM 调用异常：{e}")
-            traceback.print_exc()
             break
 
 # ====================== 主循环 ======================
