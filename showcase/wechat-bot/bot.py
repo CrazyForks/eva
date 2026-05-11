@@ -38,8 +38,8 @@ bot = WeChatBot()
 @bot.on_message
 async def handle(msg):
     await bot.send_typing(msg.user_id)
-    text = msg.text.strip().lower()
-    if text in ['/clear', 'clear']:
+    text = msg.text.strip()
+    if text.lower() in ['/clear', 'clear']:
         args = ["eva", "-c"]
     else:
         args = ["eva", "-asu", text]
