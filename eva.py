@@ -84,7 +84,6 @@ SHELL_FLAG = "-Command" if IS_WINDOWS else "-c"
 # ====================== 环境探针 ======================
 
 def collect_env_info():
-    today = date.today().strftime("%Y-%m-%d")
     cmds = {
         "Linux": [
             "uname -a",
@@ -126,6 +125,8 @@ def collect_env_info():
             results.append(f"{label}\n{output}")
         except Exception:
             pass
+    
+    today = date.today().strftime("%Y-%m-%d")
     return f"=== 今天日期 ===\n{today}\n\n" + ("\n\n".join(results) if results else "环境信息获取失败")
 
 ENV_INFO = collect_env_info()
@@ -313,8 +314,7 @@ tool_executors = {
 def clean_input(text):
     if not isinstance(text, str):
         return str(text)
-    text = re.sub(r'[\ud800-\udfff]', '', text)
-    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    text = re.sub(r'[\ud800-\udfff\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
     return text
 
 
@@ -719,8 +719,6 @@ def setup_eva_script():
 
 def main():
     global ALLOW_ALL_CLI, messages
-    if not IS_WINDOWS:
-        setup_eva_script()
 
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="人类你好，我是EVA")
@@ -745,6 +743,9 @@ def main():
     elif args.clear_session:
         clear_session()
         return
+
+    if not IS_WINDOWS:
+        setup_eva_script()
 
     # Slogan
     if not args.user_ask or args.with_session:
