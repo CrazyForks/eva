@@ -4,7 +4,6 @@ import json
 import subprocess
 import sys
 import argparse
-import platform
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -76,7 +75,7 @@ COMPACT_PANIC = False
 LAST_USAGE = None
 
 # ====================== 跨平台配置区 ======================
-IS_WINDOWS = platform.system() == "Windows"
+IS_WINDOWS = os.name == "nt"
 OS_NAME = "Windows" if IS_WINDOWS else "Linux"
 SHELL = "powershell" if IS_WINDOWS else "bash"
 SHELL_FLAG = "-Command" if IS_WINDOWS else "-c"
