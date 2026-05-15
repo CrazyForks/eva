@@ -2,7 +2,7 @@
 
 如果一个智能体的执行层小到只是一个脚本，那它具有病毒传播一样的潜力。
 
-EVA是个麻雀虽小、五脏俱全的Agent智能体，相当于低配版Claude Code，能帮你写脚本、写测试案例、执行shell、分析数据等。
+EVA是个麻雀虽小、五脏俱全的Agent智能体，相当于低配版Claude Code，能帮你写脚本、写测试案例、执行shell、分析数据等。我自己就是EVA的重度用户，日常使用频率非常高。
 
 各种好玩案例见当前仓库的 [showcase](./showcase) 🦖🦖🦖
 
@@ -103,5 +103,3 @@ EVA通过`.eva/hints.md`获取记忆线索，该线索会被拼接到system prom
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=usepr/eva&type=date&legend=top-left" />
  </picture>
 </a>
-
-[![linux.do](https://shorturl.at/ggSqS)](https://linux.do)
